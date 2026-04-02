@@ -46,7 +46,53 @@ public class StockController : ControllerBase
     [Authorize(Roles = $"{Roles.InventoryClerk},{Roles.InventoryManager},{Roles.Admin}")]
     public async Task<IActionResult> Transaction([FromBody] CreateStockTransactionCommand command)
     {
-        var result = await _stockService.CreateStockTransactionAsync(command.ProductId, command.WarehouseId, command.TransactionType.ToString(), command.Quantity, command.ReferenceNumber, command.TransactionDate);
+        var result = await _stockService.CreateStockTransactionAsync(
+            command.ProductId, 
+            command.WarehouseId, 
+            command.DestinationWarehouseId, 
+            command.TransactionType.ToString(), 
+            command.Quantity, 
+            command.ReferenceNumber, 
+            command.TransactionDate,
+            command.BatchId);
         return Ok(new { TransactionId = result });
     }
+
+    [HttpPost("reserve")]
+    [Authorize(Roles = $"{Roles.InventoryClerk},{Roles.InventoryManager},{Roles.Admin}")]
+    public async Task<IActionResult> Reserve([FromBody] CreateReservationRequest request)
+    {
+        var result = await _stockService.CreateReservationAsync(
+            request.ProductId, 
+            request.WarehouseId, 
+            request.Quantity, 
+            request.ExpiryDate, 
+            request.Reference);
+        return Ok(new { ReservationId = result });
+    }
+
+    [HttpPost("reserve/{id}/cancel")]
+    [Authorize(Roles = $"{Roles.InventoryClerk},{Roles.InventoryManager},{Roles.Admin}")]
+    public async Task<IActionResult> CancelReservation(Guid id)
+    {
+        await _stockService.CancelReservationAsync(id);
+        return Ok();
+    }
+
+    [HttpGet("{productId}/batches/{warehouseId}")]
+    [Authorize(Roles = $"{Roles.InventoryClerk},{Roles.InventoryManager},{Roles.Admin}")]
+    public async Task<IActionResult> GetBatches(Guid productId, Guid warehouseId)
+    {
+        var result = await _stockService.GetActiveBatchesAsync(productId, warehouseId);
+        return Ok(result);
+    }
+}
+
+public class CreateReservationRequest
+{
+    public Guid ProductId { get; set; }
+    public Guid WarehouseId { get; set; }
+    public int Quantity { get; set; }
+    public DateTime ExpiryDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
 }

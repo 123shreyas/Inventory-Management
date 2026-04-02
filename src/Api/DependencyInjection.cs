@@ -63,6 +63,8 @@ public static class DependencyInjection
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<IStockService, StockService>();
         services.AddScoped<IInventoryService, InventoryService>();
+        services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
+        services.AddScoped<IReportingService, ReportingService>();
 
         // 6. AutoMapper
         services.AddAutoMapper(typeof(MappingProfile));

@@ -9,12 +9,12 @@ namespace InventoryManagement.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class WarehousesController : ControllerBase
+public class SuppliersController : ControllerBase
 {
-    private readonly IGenericRepository<Warehouse> _repository;
+    private readonly IGenericRepository<Supplier> _repository;
     private readonly IUnitOfWork _unitOfWork;
 
-    public WarehousesController(IGenericRepository<Warehouse> repository, IUnitOfWork unitOfWork)
+    public SuppliersController(IGenericRepository<Supplier> repository, IUnitOfWork unitOfWork)
     {
         _repository = repository;
         _unitOfWork = unitOfWork;
@@ -23,27 +23,27 @@ public class WarehousesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var warehouses = await _repository.GetAllAsync();
-        return Ok(warehouses);
+        var suppliers = await _repository.GetAllAsync();
+        return Ok(suppliers);
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create(Warehouse warehouse)
+    public async Task<IActionResult> Create(Supplier supplier)
     {
-        if (warehouse == null) return BadRequest();
+        if (supplier == null) return BadRequest();
         
-        await _repository.AddAsync(warehouse);
+        await _repository.AddAsync(supplier);
         await _unitOfWork.SaveChangesAsync();
         
-        return CreatedAtAction(nameof(GetAll), new { id = warehouse.WarehouseId }, warehouse);
+        return CreatedAtAction(nameof(GetAll), new { id = supplier.SupplierId }, supplier);
     }
 
     [HttpPut("{id}")]
-    public async Task<IActionResult> Update(Guid id, Warehouse warehouse)
+    public async Task<IActionResult> Update(Guid id, Supplier supplier)
     {
-        if (id != warehouse.WarehouseId) return BadRequest();
+        if (id != supplier.SupplierId) return BadRequest();
         
-        _repository.Update(warehouse);
+        _repository.Update(supplier);
         await _unitOfWork.SaveChangesAsync();
         
         return NoContent();
@@ -52,10 +52,10 @@ public class WarehousesController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(Guid id)
     {
-        var warehouse = await _repository.GetByIdAsync(id);
-        if (warehouse == null) return NotFound();
+        var supplier = await _repository.GetByIdAsync(id);
+        if (supplier == null) return NotFound();
         
-        _repository.Delete(warehouse);
+        _repository.Delete(supplier);
         await _unitOfWork.SaveChangesAsync();
         
         return NoContent();

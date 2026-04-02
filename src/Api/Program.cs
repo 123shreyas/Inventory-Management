@@ -14,9 +14,17 @@ builder.Services.AddScoped<IStockNotificationService, StockNotificationService>(
 
 builder.Services.AddCors(options =>
 {
+    options.AddPolicy("SignalRPolicy", builder =>
+    {
+        builder.WithOrigins("http://localhost:5173", "http://localhost:5174")
+               .AllowAnyHeader()
+               .AllowAnyMethod()
+               .AllowCredentials();
+    });
+    
     options.AddDefaultPolicy(builder =>
     {
-        builder.WithOrigins("http://localhost:5174") // Vite dev server
+        builder.WithOrigins("http://localhost:5173", "http://localhost:5174")
                .AllowAnyHeader()
                .AllowAnyMethod()
                .AllowCredentials();
@@ -82,7 +90,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHub<InventoryHub>("/inventoryHub");
+app.MapHub<InventoryHub>("/inventoryHub").RequireCors("SignalRPolicy");
 
 // Seed Database
 using (var scope = app.Services.CreateScope())
