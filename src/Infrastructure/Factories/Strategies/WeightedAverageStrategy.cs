@@ -18,8 +18,27 @@ public class WeightedAverageStrategy : InventoryManagement.Interfaces.Factories.
     {
         var product = await _productRepository.GetByIdAsync(productId);
         if (product == null) return 0;
+        
         var stocks = await _stockLevelRepository.GetByProductIdAsync(productId);
-        var totalQuantity = stocks.Sum(s => s.QuantityOnHand);
-        return totalQuantity * product.Cost;
+        var totalQuantityOnHand = stocks.Sum(s => s.QuantityOnHand);
+
+        if (totalQuantityOnHand <= 0) return 0;
+
+        // Get all purchases for average calculation
+        var purchases = (await _productRepository.GetByIdWithTransactionsAsync(productId))?.StockTransactions
+            .Where(t => t.TransactionType == "Purchase")
+            .ToList();
+
+        if (purchases == null || !purchases.Any())
+        {
+            return totalQuantityOnHand * product.Cost;
+        }
+
+        var totalCost = purchases.Sum(p => p.Quantity * (p.UnitPrice > 0 ? p.UnitPrice : product.Cost));
+        var totalQty = purchases.Sum(p => p.Quantity);
+
+        decimal avgCost = totalQty > 0 ? totalCost / totalQty : product.Cost;
+
+        return totalQuantityOnHand * avgCost;
     }
 }

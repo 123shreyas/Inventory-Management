@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import apiClient from '../api/apiClient';
 import { TRANSACTION_TYPES } from '../utils/constants';
 import { ArrowUpDown, Box, Warehouse, Clipboard, Loader2, Info } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 const StockMovement = () => {
   const [products, setProducts] = useState([]);
@@ -9,14 +10,19 @@ const StockMovement = () => {
   const [formData, setFormData] = useState({
     productId: '',
     warehouseId: '',
+    destinationWarehouseId: '',
     transactionType: 0,
     quantity: 1,
     referenceNumber: '',
+    batchId: '',
+    isHold: false,
+    expiryDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] // Default 7 days
   });
+  const [batches, setBatches] = useState([]);
   const [currentStock, setCurrentStock] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [message, setMessage] = useState({ type: '', text: '' });
+  const { addToast } = useToast();
 
   useEffect(() => {
     const fetchData = async () => {
@@ -36,26 +42,32 @@ const StockMovement = () => {
         setFormData(prev => ({
           ...prev,
           productId: prodItems.length > 0 ? prodItems[0].productId : '',
-          warehouseId: warItems.length > 0 ? warItems[0].warehouseId : ''
+          warehouseId: warItems.length > 0 ? warItems[0].warehouseId : '',
+          destinationWarehouseId: warItems.length > 1 ? warItems[1].warehouseId : ''
         }));
       } catch (err) {
-        console.error(err);
+        addToast('Failed to load transaction metadata.', 'error');
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, []);
+  }, [addToast]);
 
   useEffect(() => {
     if (formData.productId && formData.warehouseId) {
       const fetchStock = async () => {
         try {
-          const res = await apiClient.get(`/Stock/${formData.productId}`);
-          const stock = res.data.find(s => s.warehouseId === formData.warehouseId);
+          const [stockRes, batchRes] = await Promise.all([
+            apiClient.get(`/Stock/${formData.productId}`),
+            apiClient.get(`/Stock/${formData.productId}/batches/${formData.warehouseId}`)
+          ]);
+          const stock = stockRes.data.find(s => s.warehouseId === formData.warehouseId);
           setCurrentStock(stock ? stock.quantityOnHand : 0);
+          setBatches(batchRes.data || []);
         } catch (err) {
           setCurrentStock(0);
+          setBatches([]);
         }
       };
       fetchStock();
@@ -65,43 +77,63 @@ const StockMovement = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.productId || !formData.warehouseId) {
-      setMessage({ type: 'error', text: 'Product and Warehouse are required.' });
+      addToast('Product and Warehouse are required.', 'error');
       return;
     }
-    setSubmitting(true);
-    setMessage({ type: '', text: '' });
+    if (formData.transactionType === 4 && formData.warehouseId === formData.destinationWarehouseId) {
+      addToast('Source and Destination warehouse cannot be the same.', 'error');
+      return;
+    }
+    if (formData.transactionType === 4 && !formData.destinationWarehouseId) {
+      addToast('Destination Warehouse is required for internal transfers.', 'error');
+      return;
+    }
 
-    if (formData.transactionType === 1 && formData.quantity > currentStock) {
-      setMessage({ type: 'error', text: 'Insufficient stock for this transaction.' });
+    setSubmitting(true);
+
+    if ((formData.transactionType === 1 || formData.transactionType === 4) && formData.quantity > currentStock) {
+      addToast('Insufficient stock for this transaction.', 'error');
       setSubmitting(false);
       return;
     }
 
     try {
-      await apiClient.post('/Stock/transaction', {
-        ...formData,
-        transactionDate: new Date().toISOString()
-      });
-      setMessage({ type: 'success', text: 'Stock transaction recorded successfully!' });
-      setFormData(prev => ({ ...prev, quantity: 1, referenceNumber: '' }));
+      if (formData.isHold) {
+        await apiClient.post('/Stock/reserve', {
+          productId: formData.productId,
+          warehouseId: formData.warehouseId,
+          quantity: formData.quantity,
+          expiryDate: formData.expiryDate,
+          reference: formData.referenceNumber
+        });
+        addToast('Stock hold (reservation) created successfully!', 'success');
+      } else {
+        await apiClient.post('/Stock/transaction', {
+          ...formData,
+          transactionDate: new Date().toISOString()
+        });
+        addToast('Stock transaction recorded successfully!', 'success');
+      }
+
+      setFormData(prev => ({ ...prev, quantity: 1, referenceNumber: '', isHold: false }));
       
       const res = await apiClient.get(`/Stock/${formData.productId}`);
       const stock = res.data.find(s => s.warehouseId === formData.warehouseId);
       setCurrentStock(stock ? stock.quantityOnHand : 0);
     } catch (err) {
       const errorMsg = err.response?.data?.detailed || err.response?.data?.message || 'Transaction failed.';
-      setMessage({ type: 'error', text: errorMsg });
+      addToast(errorMsg, 'error');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     const isNumeric = name === 'quantity' || name === 'transactionType';
     setFormData(prev => ({
       ...prev,
-      [name]: isNumeric ? (value === '' ? '' : parseInt(value)) : value
+      [name]: type === 'checkbox' ? checked : (isNumeric ? (value === '' ? '' : parseInt(value)) : value)
     }));
   };
 
@@ -141,7 +173,7 @@ const StockMovement = () => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Location / Warehouse</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Location / Source Warehouse</label>
                   <div className="relative">
                     <Warehouse className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                     <select
@@ -175,6 +207,26 @@ const StockMovement = () => {
                   </div>
                 </div>
 
+                {formData.transactionType === 4 && (
+                  <div className="md:col-span-2 p-6 bg-blue-50/50 rounded-2xl border border-blue-100 flex flex-col gap-2 mt-2">
+                    <label className="block text-sm font-bold text-blue-900">Destination Warehouse (For Transfer)</label>
+                    <div className="relative">
+                      <Warehouse className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-400" size={18} />
+                      <select
+                        name="destinationWarehouseId"
+                        className="w-full pl-11 pr-4 py-3 bg-white border border-blue-200 rounded-xl focus:ring-2 focus:ring-blue-500 transition-all font-bold text-blue-800 appearance-none shadow-sm"
+                        value={formData.destinationWarehouseId}
+                        onChange={handleChange}
+                      >
+                        <option value="" disabled>Select destination</option>
+                        {warehouses.map(w => w.warehouseId !== formData.warehouseId && (
+                          <option key={'dest-' + w.warehouseId} value={w.warehouseId}>{w.warehouseName}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Transaction Quantity</label>
                   <input
@@ -200,16 +252,55 @@ const StockMovement = () => {
                     />
                   </div>
                 </div>
-              </div>
 
-              {message.text && (
-                <div className={`px-6 py-4 rounded-2xl text-sm font-bold border flex items-center gap-3 ${
-                  message.type === 'success' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'
-                }`}>
-                  <div className={`h-2 w-2 rounded-full animate-pulse ${message.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`} />
-                  {message.text}
+                {batches.length > 0 && !formData.isHold && (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Specific Batch (Optional)</label>
+                    <select
+                      name="batchId"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 transition-all font-medium text-slate-700"
+                      value={formData.batchId}
+                      onChange={handleChange}
+                    >
+                      <option value="">Auto-select (Oldest First)</option>
+                      {batches.map(b => (
+                        <option key={b.stockBatchId} value={b.stockBatchId}>
+                          {b.batchNumber} (Exp: {b.expiryDate ? new Date(b.expiryDate).toLocaleDateString() : 'N/A'}) - {b.quantity} in stock
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="md:col-span-2 flex items-center gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="flex h-6 items-center">
+                    <input
+                      name="isHold"
+                      type="checkbox"
+                      className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-600"
+                      checked={formData.isHold}
+                      onChange={handleChange}
+                    />
+                  </div>
+                  <div className="text-sm leading-6">
+                    <label className="font-black text-slate-900 uppercase tracking-widest">Mark as Stock Hold (Reservation)</label>
+                    <p className="text-slate-500 font-medium tracking-tight">Quantity will be reserved without deducting from total stock until fulfilled.</p>
+                  </div>
                 </div>
-              )}
+
+                {formData.isHold && (
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Hold Expiry Date</label>
+                    <input
+                      type="date"
+                      name="expiryDate"
+                      className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 font-medium text-slate-700"
+                      value={formData.expiryDate}
+                      onChange={handleChange}
+                    />
+                  </div>
+                )}
+              </div>
 
               <button
                 type="submit"

@@ -1,51 +1,75 @@
-version: '3.8'
-
 services:
+  # ─────────────────────────────────────────────
+  # MySQL 8.0 Database
+  # ─────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: inventory-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+    networks:
+      - inventory-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+
+  # ─────────────────────────────────────────────
+  # .NET API
+  # ─────────────────────────────────────────────
   inventory-api:
     build:
       context: .
       dockerfile: src/Api/Dockerfile
     container_name: inventory-api
     ports:
-      - "5153:5153"
+      - "${API_PORT:-5153}:5153"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=server=mysql;port=3306;database=InventoryDB;user=root;password=rootpassword;
-      - ConnectionStrings__Redis=redis:6379
-      - Jwt__SecretKey=InventoryManagement_SecretKey_2024_Security!
-      - Jwt__Issuer=InventoryApp
-      - Jwt__Audience=InventoryApp
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Development}
+      - ConnectionStrings__DefaultConnection=server=mysql;port=3306;database=${MYSQL_DATABASE};user=root;password=${MYSQL_ROOT_PASSWORD};
+      - Jwt__SecretKey=${JWT_SECRET_KEY}
+      - Jwt__Issuer=${JWT_ISSUER}
+      - Jwt__Audience=${JWT_AUDIENCE}
+      - Jwt__ExpiryMinutes=${JWT_EXPIRY_MINUTES:-60}
     depends_on:
-      - mysql
-      - redis
+      mysql:
+        condition: service_healthy
+    networks:
+      - inventory-network
+    restart: on-failure
 
-  inventory-react:
-    build:
-      context: .
-      dockerfile: frontend/Dockerfile
-    container_name: inventory-react
-    ports:
-      - "8080:80"
-    depends_on:
-      - inventory-api
-
-  mysql:
-    image: mysql:8.0
-    container_name: mysql
-    restart: always
-    environment:
-      - MYSQL_ROOT_PASSWORD=rootpassword
-      - MYSQL_DATABASE=InventoryDB
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql-data:/var/lib/mysql
-
-  redis:
-    image: redis:alpine
-    container_name: redis
-    ports:
-      - "6380:6379"
+  # ─────────────────────────────────────────────
+  # React Frontend (optional - uncomment when ready)
+  # ─────────────────────────────────────────────
+  # inventory-react:
+  #   build:
+  #     context: .
+  #     dockerfile: frontend/Dockerfile
+  #   container_name: inventory-react
+  #   ports:
+  #     - "${FRONTEND_PORT:-8080}:80"
+  #   depends_on:
+  #     - inventory-api
+  #   networks:
+  #     - inventory-network
 
 volumes:
   mysql-data:
+    driver: local
+
+networks:
+  inventory-network:
+    driver: bridge

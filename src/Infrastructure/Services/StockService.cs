@@ -18,6 +18,8 @@ public class StockService : IStockService
 {
     private readonly IStockTransactionRepository _transactionRepository;
     private readonly IStockLevelRepository _stockLevelRepository;
+    private readonly IGenericRepository<StockBatch> _batchRepository;
+    private readonly IGenericRepository<StockReservation> _reservationRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IStockTransactionValidationPipeline _validationPipeline;
     private readonly ILogger<StockService> _logger;
@@ -27,6 +29,8 @@ public class StockService : IStockService
     public StockService(
         IStockTransactionRepository transactionRepository,
         IStockLevelRepository stockLevelRepository,
+        IGenericRepository<StockBatch> batchRepository,
+        IGenericRepository<StockReservation> reservationRepository,
         IUnitOfWork unitOfWork,
         IStockTransactionValidationPipeline validationPipeline,
         ILogger<StockService> logger,
@@ -35,6 +39,8 @@ public class StockService : IStockService
     {
         _transactionRepository = transactionRepository;
         _stockLevelRepository = stockLevelRepository;
+        _batchRepository = batchRepository;
+        _reservationRepository = reservationRepository;
         _unitOfWork = unitOfWork;
         _validationPipeline = validationPipeline;
         _logger = logger;
@@ -42,7 +48,7 @@ public class StockService : IStockService
         _notificationService = notificationService;
     }
 
-    public async Task<Guid> CreateStockTransactionAsync(Guid productId, Guid warehouseId, string transactionType, int quantity, string referenceNumber, DateTime transactionDate)
+    public async Task<Guid> CreateStockTransactionAsync(Guid productId, Guid warehouseId, Guid? destinationWarehouseId, string transactionType, int quantity, string referenceNumber, DateTime transactionDate, Guid? batchId = null)
     {
         TransactionType type;
         if (int.TryParse(transactionType, out int enumValue))
@@ -54,35 +60,39 @@ public class StockService : IStockService
             throw new BadRequestException($"Invalid transaction type: {transactionType}");
         }
 
-        var requestContext = new TransactionRequestContext
+        if (type == TransactionType.Transfer && !destinationWarehouseId.HasValue)
         {
-            ProductId = productId,
-            WarehouseId = warehouseId,
-            Quantity = quantity,
-            TransactionType = type
-        };
+            throw new BadRequestException("Destination Warehouse is required for Transfers.");
+        }
 
-        // 1. Run Validation Pipeline
+        // 1. Run Validation Pipeline (Checks basic logic like non-negative stock)
+        var requestContext = new TransactionRequestContext { ProductId = productId, WarehouseId = warehouseId, Quantity = quantity, TransactionType = type };
         await _validationPipeline.ValidateAsync(requestContext);
 
-        // 2. Begin atomic Transaction
-        await _unitOfWork.BeginTransactionAsync();
+        // 2. Check Reservations if it's an Outbound transaction (Sale/Transfer)
+        if (type == TransactionType.Sale || type == TransactionType.Transfer)
+        {
+            var reservations = (await _reservationRepository.GetAllAsync())
+                .Where(r => r.ProductId == productId && r.WarehouseId == warehouseId && r.Status == ReservationStatus.Pending)
+                .Sum(r => r.Quantity);
+            
+            var stock = await _stockLevelRepository.GetByProductAndWarehouseAsync(productId, warehouseId);
+            int onHand = stock?.QuantityOnHand ?? 0;
+            
+            if (onHand - reservations < quantity)
+            {
+                throw new BadRequestException($"Insufficient available stock. On Hand: {onHand}, Reserved: {reservations}, Requested: {quantity}");
+            }
+        }
 
+        await _unitOfWork.BeginTransactionAsync();
         try
         {
+            // 3. Update Stock Level
             var stock = await _stockLevelRepository.GetByProductAndWarehouseAsync(productId, warehouseId);
-
             if (stock == null)
             {
-                stock = new StockLevel
-                {
-                    StockLevelId = Guid.NewGuid(),
-                    ProductId = productId,
-                    WarehouseId = warehouseId,
-                    QuantityOnHand = 0,
-                    ReorderLevel = 0,
-                    SafetyStock = 0
-                };
+                stock = new StockLevel { StockLevelId = Guid.NewGuid(), ProductId = productId, WarehouseId = warehouseId, QuantityOnHand = 0 };
                 await _stockLevelRepository.AddAsync(stock);
             }
 
@@ -95,10 +105,26 @@ public class StockService : IStockService
                 TransactionType.Transfer => -quantity,
                 _ => quantity
             };
-
             stock.QuantityOnHand += quantityChange;
-            // _stockLevelRepository.Update(stock); // Redundant if tracked, and potentially problematic if related entities are tracked but not updated.
 
+            // 4. Update Batch if applicable
+            if (batchId.HasValue)
+            {
+                var batch = await _batchRepository.GetByIdAsync(batchId.Value);
+                if (batch != null)
+                {
+                    batch.Quantity += quantityChange;
+                    if (batch.Quantity < 0) throw new BadRequestException("Insufficient quantity in selected batch.");
+                    _batchRepository.Update(batch);
+                }
+            }
+            else if (type == TransactionType.Purchase)
+            {
+                // Auto-create a batch for purchases if none specified? 
+                // Or let the caller decide. For now, let's keep it simple.
+            }
+
+            // 5. Record Transaction
             var transaction = new StockTransaction
             {
                 TransactionId = Guid.NewGuid(),
@@ -106,21 +132,31 @@ public class StockService : IStockService
                 WarehouseId = warehouseId,
                 TransactionType = type.ToString(),
                 Quantity = quantity,
+                UnitPrice = 0, // Should be passed in or fetched from PO
                 Reference = string.IsNullOrWhiteSpace(referenceNumber) ? "N/A" : referenceNumber,
-                TransactionDate = transactionDate != default && transactionDate != DateTime.MinValue ? transactionDate : DateTime.UtcNow
+                TransactionDate = transactionDate != default ? transactionDate : DateTime.UtcNow
             };
-
             await _transactionRepository.AddAsync(transaction);
+
+            // 6. Handle Transfer Destination
+            if (type == TransactionType.Transfer && destinationWarehouseId.HasValue)
+            {
+                var destStock = await _stockLevelRepository.GetByProductAndWarehouseAsync(productId, destinationWarehouseId.Value);
+                if (destStock == null)
+                {
+                    destStock = new StockLevel { StockLevelId = Guid.NewGuid(), ProductId = productId, WarehouseId = destinationWarehouseId.Value, QuantityOnHand = 0 };
+                    await _stockLevelRepository.AddAsync(destStock);
+                }
+                destStock.QuantityOnHand += quantity;
+
+                var destTransaction = new StockTransaction { TransactionId = Guid.NewGuid(), ProductId = productId, WarehouseId = destinationWarehouseId.Value, TransactionType = "TransferIn", Quantity = quantity, Reference = $"From: {warehouseId}", TransactionDate = transaction.TransactionDate };
+                await _transactionRepository.AddAsync(destTransaction);
+            }
 
             await _unitOfWork.CommitAsync();
 
-            // Notify real-time update
             if (stock.Product != null)
-            {
                 await _notificationService.NotifyStockUpdateAsync(productId, stock.Product.ProductName, stock.QuantityOnHand, stock.Product.ReorderLevel);
-            }
-
-            _logger.LogInformation("Processed stock transaction {TransactionId} for Product {ProductId}", transaction.TransactionId, productId);
 
             return transaction.TransactionId;
         }
@@ -147,5 +183,54 @@ public class StockService : IStockService
     {
         var stock = await _stockLevelRepository.GetByWarehouseIdAsync(warehouseId);
         return _mapper.Map<IEnumerable<StockLevelDto>>(stock);
+    }
+
+    public async Task<Guid> CreateReservationAsync(Guid productId, Guid warehouseId, int quantity, DateTime expiryDate, string reference)
+    {
+        var stock = await _stockLevelRepository.GetByProductAndWarehouseAsync(productId, warehouseId);
+        int onHand = stock?.QuantityOnHand ?? 0;
+        
+        var existingReservations = (await _reservationRepository.GetAllAsync())
+            .Where(r => r.ProductId == productId && r.WarehouseId == warehouseId && r.Status == ReservationStatus.Pending)
+            .Sum(r => r.Quantity);
+
+        if (onHand - existingReservations < quantity)
+        {
+            throw new BadRequestException("Insufficient available stock to create reservation.");
+        }
+
+        var reservation = new StockReservation
+        {
+            ReservationId = Guid.NewGuid(),
+            ProductId = productId,
+            WarehouseId = warehouseId,
+            Quantity = quantity,
+            ExpiryDate = expiryDate,
+            Reference = reference,
+            Status = ReservationStatus.Pending
+        };
+
+        await _reservationRepository.AddAsync(reservation);
+        await _unitOfWork.SaveChangesAsync();
+        return reservation.ReservationId;
+    }
+
+    public async Task CancelReservationAsync(Guid reservationId)
+    {
+        var reservation = await _reservationRepository.GetByIdAsync(reservationId);
+        if (reservation == null) throw new NotFoundException("Reservation not found.");
+        
+        reservation.Status = ReservationStatus.Cancelled;
+        _reservationRepository.Update(reservation);
+        await _unitOfWork.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<object>> GetActiveBatchesAsync(Guid productId, Guid warehouseId)
+    {
+        var batches = (await _batchRepository.GetAllAsync())
+            .Where(b => b.ProductId == productId && b.WarehouseId == warehouseId && b.Quantity > 0 && (b.ExpiryDate == null || b.ExpiryDate > DateTime.UtcNow))
+            .OrderBy(b => b.ExpiryDate ?? DateTime.MaxValue);
+            
+        return batches; // In a real app, Map to DTO
     }
 }

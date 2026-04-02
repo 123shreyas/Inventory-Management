@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import apiClient from '../api/apiClient';
-import { ArrowLeft, Save, Loader2, Package, Hash, DollarSign, Tag, Ruler } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Package, Hash, IndianRupee, Tag, Ruler } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 const ProductForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const isEdit = !!id;
+  const { addToast } = useToast();
 
   const [formData, setFormData] = useState({
     productName: '',
@@ -24,7 +26,6 @@ const ProductForm = () => {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -55,32 +56,38 @@ const ProductForm = () => {
           setFormData(prev => ({ ...prev, categoryId: catRes.data[0].categoryId }));
         }
       } catch (err) {
-        setError('Failed to fetch required data.');
+        addToast('Failed to fetch required data.', 'error');
       } finally {
         setFetching(false);
       }
     };
     fetchData();
-  }, [id, isEdit]);
+  }, [id, isEdit, addToast]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.categoryId) {
-      setError('Please select a category.');
+      addToast('Please select a category.', 'error');
+      return;
+    }
+    if (formData.listPrice < formData.cost) {
+      addToast('List Price must be greater than or equal to Purchase Cost.', 'error');
       return;
     }
     setLoading(true);
-    setError('');
 
     try {
       if (isEdit) {
         await apiClient.put(`/Products/${id}`, formData);
+        addToast('Product updated successfully!', 'success');
       } else {
         await apiClient.post('/Products', formData);
+        addToast('Product registered successfully!', 'success');
       }
       navigate('/products');
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to save product.');
+      const msg = err.response?.data?.detailed || err.response?.data?.message || 'Failed to save product.';
+      addToast(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -211,7 +218,7 @@ const ProductForm = () => {
                  <div>
                    <label className="block text-sm font-bold text-slate-700 mb-2">Purchase Cost</label>
                    <div className="relative group">
-                     <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={18} />
+                     <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500" size={18} />
                      <input
                        type="number"
                        name="cost"
@@ -225,7 +232,7 @@ const ProductForm = () => {
                  <div>
                    <label className="block text-sm font-bold text-slate-700 mb-2">List Price</label>
                    <div className="relative group">
-                     <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" size={18} />
+                     <IndianRupee className="absolute left-4 top-1/2 -translate-y-1/2 text-blue-500" size={18} />
                      <input
                        type="number"
                        name="listPrice"
@@ -282,13 +289,6 @@ const ProductForm = () => {
                </div>
             </div>
           </div>
-
-          {error && (
-            <div className="bg-red-50 text-red-600 px-6 py-4 rounded-2xl text-sm font-bold border border-red-100 flex items-center justify-center gap-3">
-              <div className="h-2 w-2 rounded-full bg-red-600 animate-ping" />
-              {error}
-            </div>
-          )}
 
           <div className="pt-8 border-t border-slate-100 flex justify-end gap-4">
             <button

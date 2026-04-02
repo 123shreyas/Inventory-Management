@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Node.js
+**/node_modules/
+**/dist/
+**/build/
+
+# Docker
+docker-compose*.yml
+.dockerignore
+Dockerfile
+
+# Environment files
+.env
+.env.*
+
+# Logs
+*.log
+*.txt
+
+# Documentation
+*.md

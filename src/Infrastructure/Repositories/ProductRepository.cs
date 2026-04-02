@@ -46,4 +46,11 @@ public class ProductRepository : GenericRepository<Product>, IProductRepository
     {
         return await _dbSet.CountAsync();
     }
+
+    public async Task<Product?> GetByIdWithTransactionsAsync(Guid id)
+    {
+        return await _dbSet
+            .Include(p => p.StockTransactions)
+            .FirstOrDefaultAsync(p => p.ProductId == id);
+    }
 }

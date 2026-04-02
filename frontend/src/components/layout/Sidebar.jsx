@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Box, ArrowLeftRight, Bell, LogOut, Package } from 'lucide-react';
+import { LayoutDashboard, Box, ArrowLeftRight, Bell, LogOut, Package, DollarSign, Warehouse, Truck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 const Sidebar = () => {
@@ -9,7 +9,13 @@ const Sidebar = () => {
   const navItems = [
     { name: 'Dashboard', path: '/', icon: <LayoutDashboard size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
     { name: 'Products', path: '/products', icon: <Package size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
+    { name: 'Categories', path: '/categories', icon: <LayoutDashboard size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
     { name: 'Stock Movement', path: '/stock-movement', icon: <ArrowLeftRight size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
+    { name: 'Valuation', path: '/valuation', icon: <DollarSign size={20} />, roles: ['Admin', 'InventoryManager'] },
+    { name: 'Warehouses', path: '/warehouses', icon: <Warehouse size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
+    { name: 'Suppliers', path: '/suppliers', icon: <Truck size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
+    { name: 'Purchase Orders', path: '/purchase-orders', icon: <Truck size={20} />, roles: ['Admin', 'InventoryManager'] },
+    { name: 'Analytics', path: '/analytics', icon: <LayoutDashboard size={20} />, roles: ['Admin', 'InventoryManager'] },
     { name: 'Alerts', path: '/alerts', icon: <Bell size={20} />, roles: ['Admin', 'InventoryManager', 'InventoryClerk'] },
   ];
 

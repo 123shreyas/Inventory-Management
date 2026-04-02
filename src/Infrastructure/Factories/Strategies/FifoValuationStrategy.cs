@@ -24,9 +24,32 @@ public class FifoValuationStrategy : InventoryManagement.Interfaces.Factories.II
         var stocks = await _stockLevelRepository.GetByProductIdAsync(productId);
         var totalQuantityOnHand = stocks.Sum(s => s.QuantityOnHand);
 
-        // Simple FIFO: Use the most recent purchase costs
-        // In a full implementation, we'd track each lot.
-        // For 'simplified acceptable', we'll use the product's cost.
-        return totalQuantityOnHand * product.Cost;
+        if (totalQuantityOnHand <= 0) return 0;
+
+        // Get all purchases/returns sorted by date DESC (walk backwards from most recent)
+        var transactions = (await _transactionRepository.GetAllAsync())
+            .Where(t => t.ProductId == productId && (t.TransactionType == "Purchase" || t.TransactionType == "Return"))
+            .OrderByDescending(t => t.TransactionDate)
+            .ToList();
+
+        decimal valuation = 0;
+        int remainingQty = totalQuantityOnHand;
+
+        foreach (var tx in transactions)
+        {
+            if (remainingQty <= 0) break;
+
+            int qtyToTake = Math.Min(tx.Quantity, remainingQty);
+            valuation += qtyToTake * (tx.UnitPrice > 0 ? tx.UnitPrice : product.Cost);
+            remainingQty -= qtyToTake;
+        }
+
+        // If we still have remaining quantity (e.g. from initial stock not in transactions), use current product cost
+        if (remainingQty > 0)
+        {
+            valuation += remainingQty * product.Cost;
+        }
+
+        return valuation;
     }
 }

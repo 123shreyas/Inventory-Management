@@ -18,5 +18,5 @@ public class Product
     // Navigation properties
     public ProductCategory? Category { get; set; }
     public ICollection<StockLevel> StockLevels { get; set; } = new List<StockLevel>();
-    public ICollection<StockTransaction> Transactions { get; set; } = new List<StockTransaction>();
+    public ICollection<StockTransaction> StockTransactions { get; set; } = new List<StockTransaction>();
 }

@@ -15,6 +15,10 @@ public class ApplicationDbContext : DbContext
     public DbSet<Warehouse> Warehouses { get; set; } = null!;
     public DbSet<StockLevel> StockLevels { get; set; } = null!;
     public DbSet<StockTransaction> StockTransactions { get; set; } = null!;
+    public DbSet<StockBatch> StockBatches { get; set; } = null!;
+    public DbSet<StockReservation> StockReservations { get; set; } = null!;
+    public DbSet<PurchaseOrder> PurchaseOrders { get; set; } = null!;
+    public DbSet<PurchaseOrderDetail> PurchaseOrderDetails { get; set; } = null!;
     public DbSet<Supplier> Suppliers { get; set; } = null!;
     public DbSet<ProductSupplier> ProductSuppliers { get; set; } = null!;
     public DbSet<User> Users { get; set; } = null!;
@@ -24,16 +28,8 @@ public class ApplicationDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // Map to lowercase table names as seen in MySQL
-        modelBuilder.Entity<Product>().ToTable("products");
-        modelBuilder.Entity<ProductCategory>().ToTable("productcategories");
-        modelBuilder.Entity<Warehouse>().ToTable("warehouses");
-        modelBuilder.Entity<StockLevel>().ToTable("stocklevels");
-        modelBuilder.Entity<StockTransaction>().ToTable("stocktransactions");
-        modelBuilder.Entity<User>().ToTable("users");
-        modelBuilder.Entity<Role>().ToTable("roles");
-        modelBuilder.Entity<Supplier>().ToTable("suppliers");
-        modelBuilder.Entity<ProductSupplier>().ToTable("productsuppliers");
+        // Table names will map to their DbSet names by default (PascalCase),
+        // which matches the existing EF Core migrations in this project.
 
         // Product Category Configuration
         modelBuilder.Entity<ProductCategory>(entity =>
@@ -96,9 +92,10 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.TransactionId);
             entity.Property(e => e.TransactionType).IsRequired().HasMaxLength(50);
             entity.Property(e => e.Reference).HasMaxLength(100);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 2);
 
             entity.HasOne(e => e.Product)
-                .WithMany(p => p.Transactions)
+                .WithMany(p => p.StockTransactions)
                 .HasForeignKey(e => e.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
 
@@ -153,6 +150,40 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.RoleId);
             entity.HasIndex(e => e.Name).IsUnique();
             entity.Property(e => e.Name).IsRequired().HasMaxLength(50);
+        });
+
+        // StockBatch Configuration
+        modelBuilder.Entity<StockBatch>(entity =>
+        {
+            entity.HasKey(e => e.StockBatchId);
+            entity.HasIndex(e => new { e.ProductId, e.WarehouseId, e.BatchNumber }).IsUnique();
+            entity.Property(e => e.BatchNumber).IsRequired().HasMaxLength(50);
+        });
+
+        // StockReservation Configuration
+        modelBuilder.Entity<StockReservation>(entity =>
+        {
+            entity.HasKey(e => e.ReservationId);
+            entity.Property(e => e.Reference).HasMaxLength(100);
+            entity.Property(e => e.Status).HasConversion<string>();
+        });
+
+        // PurchaseOrder Configuration
+        modelBuilder.Entity<PurchaseOrder>(entity =>
+        {
+            entity.HasKey(e => e.PurchaseOrderId);
+            entity.HasIndex(e => e.OrderNumber).IsUnique();
+            entity.Property(e => e.OrderNumber).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Status).HasConversion<string>();
+            entity.Property(e => e.TotalAmount).HasPrecision(18, 2);
+        });
+
+        // PurchaseOrderDetail Configuration
+        modelBuilder.Entity<PurchaseOrderDetail>(entity =>
+        {
+            entity.HasKey(e => e.PurchaseOrderDetailId);
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 2);
+            entity.Property(e => e.Discount).HasPrecision(18, 2);
         });
     }
 }

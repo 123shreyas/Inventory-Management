@@ -123,8 +123,8 @@ const ProductList = () => {
                     </td>
                     <td className="px-6 py-5">
                       <div className="flex flex-col">
-                        <span className="text-sm font-bold text-slate-900">${product.listPrice.toFixed(2)}</span>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Cost: ${product.cost.toFixed(2)}</span>
+                        <span className="text-sm font-bold text-slate-900">₹{product.listPrice.toFixed(2)}</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">Cost: ₹{product.cost.toFixed(2)}</span>
                       </div>
                     </td>
                     <td className="px-6 py-5">
